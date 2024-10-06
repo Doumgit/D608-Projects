@@ -1,0 +1,181 @@
+---
+title: "Analysis of IIJA Funding Allocation"
+author: "Souleymane Doumbia"
+date: "`r Sys.Date()`"
+output:
+  slidy_presentation: 
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 3
+    toc_float: true
+  beamer_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+  ioslides_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Required Libraries
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(ggthemes)
+library(corrplot)
+```
+
+# Introduction
+This report examines the allocation of the Infrastructure Investment and Jobs Act (IIJA) funding across U.S. states and territories. The analysis addresses two key questions:
+
+1. Is the allocation equitable based on the population and infrastructure needs of the states, or is there evidence of bias?
+
+2. Does the allocation favor the political interests of the Biden administration?
+
+
+# Data Overview
+The dataset includes:
+
+- IIJA funding allocation per state as of March 2023
+
+- Population estimates as of July 1, 2023
+
+- Infrastructure grades from the ASCE
+
+- Unemployment rates as of March 2023
+
+- Political affiliation of each state based on the 2020 presidential election
+
+
+```{r Data_Preparation, echo=FALSE}
+# Data Preparation & Analysis:
+# Loading the dataset
+data <- read.csv("https://raw.githubusercontent.com/Doumgit/D608-Projects/refs/heads/main/IIJA%20FUNDING%2003_2023%20.csv")  
+
+# Clean up the population column (convert to numeric by removing commas)
+data$Population.Estimate.as.July.1..2023.USCENSUS <- as.numeric(gsub(",", "", data$Population.Estimate.as.July.1..2023.USCENSUS))
+
+# Converting other necessary columns to numeric
+data$Total..Billions. <- as.numeric(data$Total..Billions.)
+data$Unemployment.rate.03.2023 <- as.numeric(data$Unemployment.rate.03.2023)
+
+# Filtering out rows with missing values 
+data_clean <- data %>%
+  filter(!is.na(Total..Billions.) & !is.na(Population.Estimate.as.July.1..2023.USCENSUS) & State..Teritory.or.Tribal.Nation != 'PUERTO RICO')
+
+# Calculating Per Capita Funding
+data_clean$Per_Capita_Funding <- data_clean$Total..Billions. * 1e9 / data_clean$Population.Estimate.as.July.1..2023.USCENSUS
+
+# Grouping unemployment rates into categories
+data_clean$Unemployment_Group <- cut(data_clean$Unemployment.rate.03.2023, breaks = c(0, 2, 4, 6, 8), labels = c("0-2%", "2-4%", "4-6%", "6-8%"))
+
+# Summarizing funding by political affiliation
+party_funding <- data_clean %>% 
+  group_by(X2020.Presidential.Winner) %>%
+  summarise(Total_Funding = sum(Total..Billions.))
+
+# Prepare correlation matrix
+corr_data <- data_clean %>%
+  select(Per_Capita_Funding, Population.Estimate.as.July.1..2023.USCENSUS, Unemployment.rate.03.2023)
+corr_matrix <- cor(corr_data, use = "complete.obs")
+```
+
+
+# Proportion of Total Funding by Political Affiliation:
+```{r Proportion_of_Total_Funding_by_Political_Affiliation, echo=FALSE}
+ggplot(party_funding, aes(x = "", y = Total_Funding, fill = X2020.Presidential.Winner)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  labs(title = "Proportion of Total Funding by Political Affiliation", fill = NULL) +
+  scale_fill_manual(values = c("blue", "red")) +
+  theme(legend.position = "bottom")
+```
+
+
+
+# Total Funding by State and Infrastructure Grade:
+```{r Total_Funding_by_State_and_Infrastructure_Grade, echo=FALSE}
+## 2. Total Funding by State and Infrastructure Grade
+ggplot(data_clean, aes(x = reorder(State..Teritory.or.Tribal.Nation, -Total..Billions.), y = Total..Billions., fill = X2021.ASCE.Infrastructure.Grading.by.State)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_flip() +  # Flip the axes
+  labs(title = "Total Funding by State and 2021 ASCE Infrastructure Grade",
+       x = "State",
+       y = "Total Funding (Billions)",
+       fill = "2021 ASCE Infrastructure Grade") +  # Corrected legend title
+  theme_minimal() +  # Use minimal theme
+  theme(axis.text.y = element_text(angle = 0, hjust = 1, size = 6),  # Make x-axis labels vertical
+        axis.text.x = element_text(size = 8),  # Increase label size for state names
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "right",
+        panel.grid = element_blank()) +  # Remove grid lines
+  scale_fill_brewer(palette = "Set3")
+```
+
+
+
+# Per Capita Funding by Political Affiliation:
+```{r Per_Capita_Funding_by_Political_Affiliation, echo=FALSE}
+## 3. Per Capita Funding by Political Affiliation
+ggplot(data_clean, aes(x = X2020.Presidential.Winner, y = Per_Capita_Funding)) +
+  geom_boxplot() +
+  labs(title = "Per Capita Funding by Political Affiliation",
+       x = "Political Affiliation",
+       y = "Per Capita Funding (USD)") +
+  theme_minimal() +  # Keep the minimal theme
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid = element_blank(),  # Remove all grid lines
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        axis.text = element_text(size = 9))  # Adjust label sizes if needed
+```
+
+
+
+# Correlation Matrix:
+```{r Correlation_Matrix, echo=FALSE}
+colnames(corr_matrix) <- c("Per Capita", "Population", "Unemployment")
+rownames(corr_matrix) <- c("Per Capita", "Population", "Unemployment")
+
+#plotting correlation matrix
+corrplot(corr_matrix, method = "circle", type = "upper",
+         title = "Correlation Matrix of Key Variables",
+         tl.col = "black", tl.srt = 45,  
+         tl.cex = 1, 
+         mar = c(0, 0, 2, 0)
+         )
+```
+
+
+
+# Conclusion
+The analysis reveals:
+
+- **No clear partisan bias:** Republican states receive more per capita funding despite being fewer in number, which indicates no favoritism toward Democratic states.
+
+- **Weak correlation between funding and infrastructure or unemployment:** Infrastructure needs and unemployment rates are not strongly correlated with funding, suggesting other factors may influence the allocation.
+
+- **Funding allocation based on per capita differences:** States vary significantly in their per capita funding, with Republican states tending to receive more.
+
+
+# Sources:
+- **U.S. BUREAU OF LABOR STATISTICS (BLS)** for Unemployment Rates per State**:** https://www.bls.gov/lau/
+
+- **AMERICAN SOCIETY OF CIVIL ENGINEERS (ASCE)** for Infrastructure Grades per State**:** https://infrastructurereportcard.org
+
+- **UNITED STATES CENSUS BUREAU** for Population Estimates per State**:** https://www.census.gov/data/tables/time-series/demo/popest/2020s-state-total.html
+
+- **THE NEW YORK TIMES** for 2020 Presidential Election Results**:** https://www.nytimes.com/interactive/2020/11/03/us/elections/results-president.html?action=click&pgtype=Article&state=default&module=styln-elections-2020&region=TOP_BANNER&context=election_recirc
+
