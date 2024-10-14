@@ -1,0 +1,384 @@
+---
+title: "DATA 608 Story 2"
+author: "Souleymane Doumbia"
+date: "`r Sys.Date()`"
+output:
+  beamer_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+  slidy_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 3
+    toc_float: true
+  ioslides_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 3
+  html_document:
+    toc: true
+    toc_depth: '3'
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Required Libraries
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(yaml)
+library(httr)
+library(jsonlite)
+library(caret)
+library(fredr)
+library(blscrapeR)
+```
+
+## Introduction
+
+The Federal Reserve's mandate, given by Congress, focuses on two primary goals:
+
+- **Control inflation**: Measured using the Consumer Price Index (CPI), which tracks price changes over time.
+- **Maintain low unemployment**: Tracked through the unemployment rate.
+
+At times, these goals can appear conflicting. For instance, raising interest rates to control inflation may result in slower economic growth, which can increase unemployment. This project explores data from the last 25 years to examine how the Federal Reserve has attempted to balance these two objectives.
+
+## Introduction
+We used the following datasets:
+
+- **Consumer Price Index (CPI)** - Sourced from the Bureau of Labor Statistics (BLS) using BLS API
+- **Unemployment Rate** - Also sourced from BLS using BLS API
+- **Federal Funds Rate** - Obtained from the Federal Reserve's FRED database using Fred API
+
+**Key Questions:**
+
+1. **Has the Fed effectively controlled inflation over the last two decades?**
+2. **How has the unemployment rate been impacted by changes in the Fed Funds Rate?**
+3. **Is there evidence of a relationship between inflation and unemployment (Phillips Curve)?**
+
+This Report includes multiple Visualizations and statistical insights to help answer these questions.
+
+
+
+```{r  1_The_FED Funds_Rate_FRED_Federal_Reserve_Board, echo=FALSE}
+library(fredr)
+library(yaml)
+
+
+# Reading the Fred API key from the YAML file
+config <- yaml::read_yaml("fred_api.yml")
+fred_api_key <- config$FRED_API_KEY
+
+# Setting FRED API key
+fredr_set_key(fred_api_key)
+
+# Retrieving the Federal Funds Rate data
+fed_funds_rate <- fredr(
+  series_id = "FEDFUNDS",
+  observation_start = as.Date("1999-01-01"),
+  observation_end = as.Date("2024-12-31")
+)
+
+# Viewing the data
+#head(fed_funds_rate)
+```
+
+
+```{r 2_The_Consumer_Price_Index_CPI_Bureau_of_Labor_Statistics, echo=FALSE}
+library(blscrapeR)
+
+# Reading the BLS API key from the YAML file
+config <- yaml::read_yaml("bls_api.yml")
+bls_api_key <- config$BLS_API_KEY
+
+# Fetching Cinsumer Price Index (CPI) data from 1999 to 2010
+cpi_1999_2010 <- bls_api(
+  "CUSR0000SA0", 
+  startyear = 1999, 
+  endyear = 2010,
+  registrationKey = bls_api_key
+)
+
+# Fetching Consumer Price Index (CPI) data from 2011 to 2024
+cpi_2011_2024 <- bls_api(
+  "CUSR0000SA0", 
+  startyear = 2011, 
+  endyear = 2024,
+  registrationKey = bls_api_key
+)
+cpi_2011_2024 <- cpi_2011_2024 %>%
+  select(year, period, periodName, value, footnotes, seriesID)
+
+# Combining both periods
+consumer_price_index <- rbind(cpi_1999_2010, cpi_2011_2024)
+
+# Removing any duplicates
+#consumer_price_index <- consumer_price_index[!duplicated(consumer_price_index$year), ]
+
+
+# Viewing the first few rows
+#head(consumer_price_index)
+```
+
+
+```{r 3_Unemployment_Rate_Bureau_of_Labor_Statistics, echo=FALSE}
+# Fetching unemployment rate data using the correct API key parameter
+unemployment_1999_2010 <- bls_api(
+  "LNS14000000",  # Series ID for Unemployment Rate
+  startyear = 1999, 
+  endyear = 2010, 
+  registrationKey = bls_api_key  # Using the API key with the 'registrationKey' parameter
+)
+
+unemployment_2011_2024 <- bls_api(
+  "LNS14000000",  # Series ID for Unemployment Rate
+  startyear = 2011, 
+  endyear = 2024, 
+  registrationKey = bls_api_key  # Using the API key with the 'registrationKey' parameter
+)
+unemployment_2011_2024 <- unemployment_2011_2024 %>% select(-latest)
+
+unemployment_rate <- rbind(unemployment_1999_2010, unemployment_2011_2024)
+
+# Viewing the first few rows of unemployment data
+#head(unemployment_rate)
+```
+
+```{r 4_Data_Preparation_Merging_all_three_datasets, echo=FALSE}
+library(dplyr)
+library(lubridate)
+
+# 1. Converting CPI data to a proper date format
+consumer_price_index <- consumer_price_index %>%
+  mutate(date = as.Date(paste0(year, "-", substr(period, 2, 3), "-01")))  # Creating date column
+
+# 2. Converting Unemployment data to a proper date format
+unemployment_rate <- unemployment_rate %>%
+  mutate(date = as.Date(paste0(year, "-", substr(period, 2, 3), "-01")))  # Creating date column
+
+# 3. Selecting relevant columns from each dataset
+fed_funds_rate_clean <- fed_funds_rate %>%
+  select(date, Fed_Funds_Rate = value)  # Fed Funds Rate
+
+cpi_clean <- consumer_price_index %>%
+  select(date, CPI = value)  # CPI
+
+unemployment_clean <- unemployment_rate %>%
+  select(date, Unemployment_Rate = value)  # Unemployment Rate
+
+# 4. Merging all datasets by the date column
+merged_data <- fed_funds_rate_clean %>%
+  left_join(cpi_clean, by = "date") %>%
+  left_join(unemployment_clean, by = "date")
+
+# View the merged data
+#head(merged_data)
+```
+
+
+```{r 5_Normalizing_the_Data, echo=FALSE}
+# Normalizeing CPI, Fed Funds Rate, and Unemployment Rate
+merged_data <- merged_data %>%
+  mutate(CPI_scaled = (CPI - min(CPI, na.rm = TRUE)) / (max(CPI, na.rm = TRUE) - min(CPI, na.rm = TRUE)),
+         Fed_Funds_Rate_scaled = (Fed_Funds_Rate - min(Fed_Funds_Rate, na.rm = TRUE)) / (max(Fed_Funds_Rate, na.rm = TRUE) - min(Fed_Funds_Rate, na.rm = TRUE)),
+         Unemployment_Rate_scaled = (Unemployment_Rate - min(Unemployment_Rate, na.rm = TRUE)) / (max(Unemployment_Rate, na.rm = TRUE) - min(Unemployment_Rate, na.rm = TRUE)))
+
+# View the normalized data
+#head(merged_data)
+```
+
+
+## 1. Relationships between the Fed Funds Rate, CPI, and Unemployment Rate
+```{r Relationships_between_the_Fed_Funds_Rate_CPI_and_Unemployment_Rate, echo=FALSE}
+library(ggplot2)
+
+suppressWarnings({
+  # Plotting the normalized CPI, Fed Funds Rate, and Unemployment Rate
+ggplot(merged_data, aes(x = date)) +
+  geom_line(aes(y = CPI_scaled, color = "CPI"), size = 1) +
+  geom_line(aes(y = Unemployment_Rate_scaled, color = "Unemployment Rate"), size = 1) +
+  geom_line(aes(y = Fed_Funds_Rate_scaled, color = "Fed Funds Rate"), size = 1) +
+  labs(title = "Normalized CPI, Unemployment Rate, and Fed Funds Rate (1999-2024)",
+       x = "Year", y = "Normalized Value") +
+  scale_color_manual(values = c("CPI" = "red", "Unemployment Rate" = "blue", "Fed Funds Rate" = "green")) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),  # Centered title
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+})
+
+
+```
+
+
+## 2. Key Economic Events
+```{r Key_Economic_Events, echo=FALSE}
+# Plotting the normalized CPI, Fed Funds Rate, and Unemployment Rate with annotations and shaded regions
+ggplot(merged_data, aes(x = date)) +
+  # Plottinh the lines for the indicators
+  geom_line(aes(y = CPI_scaled, color = "CPI"), size = 1) +
+  geom_line(aes(y = Unemployment_Rate_scaled, color = "Unemployment Rate"), size = 1) +
+  geom_line(aes(y = Fed_Funds_Rate_scaled, color = "Fed Funds Rate"), size = 1) +
+  
+  # Highlighting shaded regions for economic events
+  geom_rect(aes(xmin = as.Date("2000-03-01"), xmax = as.Date("2002-12-01"), ymin = -Inf, ymax = Inf), fill = "gray", alpha = 0.006) +  # Dot-com Bubble
+  geom_rect(aes(xmin = as.Date("2007-12-01"), xmax = as.Date("2009-06-01"), ymin = -Inf, ymax = Inf), fill = "gray", alpha = 0.006) +  # Financial Crisis
+  geom_rect(aes(xmin = as.Date("2020-02-01"), xmax = as.Date("2021-06-01"), ymin = -Inf, ymax = Inf), fill = "gray", alpha = 0.006) +  # COVID-19 Pandemic
+  geom_rect(aes(xmin = as.Date("2022-01-01"), xmax = as.Date("2024-12-31"), ymin = -Inf, ymax = Inf), fill = "gray", alpha = 0.006) +  # Inflation Surge
+  
+  # Adding annotations for significant economic events
+  annotate("text", x = as.Date("2001-06-01"), y = 0.7, label = "Dot-com Bubble", color = "black", angle = 90, vjust = -0.5) +
+  annotate("text", x = as.Date("2009-06-01"), y = 0.7, label = "Financial Crisis", color = "black", angle = 90, vjust = -0.5) +
+  annotate("text", x = as.Date("2020-06-01"), y = 0.7, label = "COVID-19 Pandemic", color = "black", angle = 90, vjust = -0.5) +
+  annotate("text", x = as.Date("2023-01-01"), y = 0.7, label = "Inflation Surge", color = "black", angle = 90, vjust = -0.5) +
+  
+  # Setting axis labels and titles
+  labs(title = "Normalized CPI, Unemployment Rate, and Fed Funds Rate (1999-2024)",
+       x = "Year", y = "Normalized Value") +
+  scale_color_manual(values = c("CPI" = "red", "Unemployment Rate" = "blue", "Fed Funds Rate" = "green")) +
+  
+  # Minimal theme settings
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),  # Centering title
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+
+```
+
+## 3. Scatter Plot of Inflation vs. Unemployment (Phillips Curve)
+```{r Scatter_Plot_of_Inflation_vs_Unemployment_Phillips_Curve_Analysis, message=FALSE, echo=FALSE}
+# scatter plot of CPI vs. Unemployment Rate (Phillips Curve analysis)
+suppressWarnings(
+  ggplot(merged_data, aes(x = CPI, y = Unemployment_Rate)) +
+    geom_point(color = "blue", alpha = 0.6) +
+    geom_smooth(method = "lm", color = "red", se = FALSE, show.legend = FALSE) +  # Suppressing formula message
+    labs(title = "Relationship Between Inflation (CPI) and Unemployment Rate",
+         x = "CPI (Inflation)", y = "Unemployment Rate") +
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),  # Removing grid lines
+      plot.title = element_text(size = 14, hjust = .6),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10)
+    ) +
+    annotate("text", x = 270, y = 12, label = "High Unemployment \nPeriod (2009)", color = "red", vjust = -0.5, fontface = "bold")  # Example annotation
+)
+```
+
+
+## 4. Bar Plot of Average Fed Funds Rate, CPI, and Unemployment During Key Economic Events
+```{r Bar_Plot_of_Average_Fed_Funds_Rate_CPI_and_Unemployment_During_Key_Economic_Events, echo=FALSE}
+# Creating a summary dataset to calculate the average values during key events
+event_summary <- merged_data %>%
+  mutate(event = case_when(
+    date >= as.Date("2000-03-01") & date <= as.Date("2002-12-01") ~ "Dot-com Bubble",
+    date >= as.Date("2007-12-01") & date <= as.Date("2009-06-01") ~ "Financial Crisis",
+    date >= as.Date("2020-02-01") & date <= as.Date("2021-06-01") ~ "COVID-19 Pandemic",
+    date >= as.Date("2022-01-01") ~ "Inflation Surge",
+    TRUE ~ NA_character_
+  )) %>%
+  group_by(event) %>%
+  summarise(avg_CPI = mean(CPI, na.rm = TRUE),
+            avg_Unemployment = mean(Unemployment_Rate, na.rm = TRUE),
+            avg_Fed_Funds_Rate = mean(Fed_Funds_Rate, na.rm = TRUE)) %>%
+  filter(!is.na(event))
+
+# Bar plot with annotations
+ggplot(event_summary, aes(x = event)) +
+  geom_bar(aes(y = avg_CPI, fill = "CPI"), stat = "identity", position = "dodge") +
+  geom_bar(aes(y = avg_Unemployment * 10, fill = "Unemployment Rate"), stat = "identity", position = "dodge") +
+  geom_bar(aes(y = avg_Fed_Funds_Rate * 10, fill = "Fed Funds Rate"), stat = "identity", position = "dodge") +
+  labs(title = "Average Fed Funds Rate, CPI, and Unemployment Rate During Key Economic Events",
+       x = "Economic Event", y = "Average Value (Scaled)") +
+  scale_fill_manual(values = c("CPI" = "red", "Unemployment Rate" = "blue", "Fed Funds Rate" = "green")) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Removing grid lines
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.position = "bottom"
+  ) +
+  guides(fill = guide_legend(title = NULL)) +  # Removing "fill" from the legend
+
+  # Adding annotations
+  annotate("text", x = 1, y = 140, label = "High Unemployment Spike", color = "black", size = 3, angle = 90, hjust = -0.2) +  
+  annotate("text", x = 2, y = 70, label = "Low Fed Rate to Stimulate Economy", color = "black", size = 3, angle = 90, hjust = -0.2) +  
+  annotate("text", x = 3, y = 140, label = "Severe Unemployment", color = "black", size = 3, angle = 90, hjust = -0.2) +  
+  annotate("text", x = 4.1, y = 120, label = "Higher Rates to Curb Inflation", color = "black", size = 3, angle = 90, hjust = -0.2) +
+  annotate("text", x = 4, y = 120, label = "High CPI, Rising Inflation", color = "black", size = 3, angle = 90, hjust = -0.2)
+```
+
+## 5. Correlation Heatmap Between CPI, Unemployment Rate, and Fed Funds Rate
+```{r Correlation_Heatmap_Between_CPI_Unemployment_Rate_and_Fed_Funds_Rate, echo=FALSE}
+# Correlation Matrix
+cor_matrix <- cor(merged_data[, c("CPI", "Unemployment_Rate", "Fed_Funds_Rate")])
+
+# Convertin correlation matrix into a long format for ggplot
+cor_data <- as.data.frame(as.table(cor_matrix))
+
+# Plotting the heatmap with correlation coefficients inside the squares
+ggplot(cor_data, aes(Var1, Var2, fill = Freq)) +
+  geom_tile(color = "white") + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1, 1), space = "Lab", name = "Correlation") +
+  geom_text(aes(label = round(Freq, 2)), size = 5, color = "black") +  # Adding text labels for correlation coefficients
+  labs(title = "Correlation Heatmap: CPI, Unemployment Rate, and Fed Funds Rate",
+       x = "", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid = element_blank(),  # Removing background grid
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+
+## Summary
+- **Visual 1 & 2 - Trend Analysis (Normalized CPI, Unemployment Rate, and Fed Funds Rate)**: 
+  - These charts demonstrate how the Fed has raised and lowered interest rates in response to economic events. 
+  - For example, during the **COVID-19 Pandemic**, we see a sharp increase in unemployment, followed by a low **Fed Funds Rate** to stimulate economic recovery.
+  - As inflation surged in **2021-2022**, the Fed responded by raising rates dramatically to curb rising prices.
+
+- **Visual 2 - Relationship Between Inflation and Unemployment (Phillips Curve)**:
+  - The scatter plot shows a weak negative correlation between **inflation** and **unemployment**, as expected based on the **Phillips Curve**.
+  - However, exceptions occur during extreme economic crises, such as in **2009 (Great Recession)** when unemployment spiked despite relatively stable inflation.
+  - This suggests that the traditional relationship between inflation and unemployment may weaken or invert during economic shocks.
+
+## Summary
+- **Visual 3 - Bar Plot of Average CPI, Unemployment, and Fed Funds Rate by Event**:
+  - During events like the **COVID-19 Pandemic** and the **Financial Crisis**, **unemployment** was high, with low **Fed Funds Rates**, while **inflation (CPI)** remained relatively stable.
+  - Conversely, during the **Inflation Surge (2021-2022)**, the Fed aggressively raised interest rates to combat rising inflation, and we see **CPI** towering above other metrics during this period.
+
+- **Visual 4 - Correlation Heatmap**:
+  - The correlation heatmap reveals that the **Fed Funds Rate** and **Unemployment Rate** are negatively correlated (-0.6), while the correlation between **CPI** and both the **Fed Funds Rate** (-0.17) and **Unemployment Rate** (-0.14) is weakly negative.
+  - This suggests that as the **Fed Funds Rate** increases, unemployment tends to decrease, as higher rates often coincide with efforts to curb inflation and maintain economic stability.
+  - Conversely, when the **Fed Funds Rate** decreases (often during economic crises), unemployment tends to rise, as seen in periods of recovery when interest rates are kept low to stimulate growth, but unemployment remains high until full recovery.
+
+
+## Conclusion
+
+- The **Fed** has effectively utilized the **Fed Funds Rate** to control inflation during periods of rising prices (e.g., 2021-2022).
+- The relationship between **inflation** and **unemployment** appears weaker during economic crises (e.g., 2008, 2020).
+- The Fed's dual mandate remains a challenging balancing act, as actions to reduce inflation can adversely affect unemployment, particularly during crises where both **inflation** and **unemployment** can rise simultaneously.
+- The analysis demonstrates that while the **Federal Reserve** has been largely effective in responding to economic crises with appropriate rate adjustments, the interaction between inflation and unemployment is complex, and external shocks often require adaptive and non-linear responses.
+
+## Sources
+- **Consumer Price Index (CPI)** - Bureau of Labor Statistics (BLS): [https://www.bls.gov](https://www.bls.gov)
+- **Unemployment Rate** - Bureau of Labor Statistics (BLS): [https://www.bls.gov](https://www.bls.gov)
+- **Federal Funds Rate** - Federal Reserve's FRED Database: [https://fred.stlouisfed.org](https://fred.stlouisfed.org)
