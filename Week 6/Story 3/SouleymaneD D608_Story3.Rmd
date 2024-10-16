@@ -1,0 +1,210 @@
+---
+title: "Story 3 - Do Stricter Gun Laws Reduce Firearm Gun Deaths?"
+author: "Souleymane Doumbia"
+date: "`r Sys.Date()`"
+output:
+  beamer_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+  html_document:
+    toc: true
+    toc_depth: '3'
+    df_print: paged
+  ioslides_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 3
+  slidy_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 3
+    toc_float: true
+---
+
+
+# Introduction
+
+- Analyze whether stricter firearm control laws reduce firearm mortality.
+- Use data from the CDC on firearm-related deaths.
+- Incorporate information from the Giffords Annual Gun Law Scorecard.
+- Categorize each state's gun control laws.
+- Compare categorized gun control laws against firearm death rates.
+- Present results using heat maps to visualize relationships between gun law strictness and firearm mortality.
+
+
+```{r load-libraries, echo=FALSE}
+# Load necessary libraries 
+suppressWarnings({
+  suppressMessages({
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggthemes)
+library(viridis)
+#library(usmap)
+  })
+})
+```
+
+
+```{r load-firearm-data, echo=FALSE}
+# Accessing Firearm Mortality Data from the CDC API
+
+url <- "https://data.cdc.gov/resource/489q-934x.json"
+response <- GET(url)
+cdc_data <- fromJSON(content(response, as = "text"))
+
+# Convert data to a dataframe
+cdc_df <- as.data.frame(cdc_data)
+```
+
+
+```{r data-cleaning, echo=FALSE}
+# Data Cleaning and Preparation
+
+# Adjust column names to match the data and pivot the dataframe longer
+names(cdc_df) <- tolower(names(cdc_df))
+cdc_long <- cdc_df %>%
+  pivot_longer(
+    cols = starts_with("rate_"),
+    names_to = "state",
+    names_prefix = "rate_",
+    values_to = "rate_overall"
+  ) %>%
+  mutate(state = gsub("_", " ", state)) %>%
+  filter(!is.na(rate_overall) & rate_overall != "" & grepl("^[0-9.]+$", rate_overall)) %>%
+  mutate(rate_overall = as.numeric(rate_overall))
+
+# Filter out non-state entries
+cdc_long_state <- cdc_long %>%
+  filter(!state %in% c('65 74', 'age 1 4', 'age 15 24', 'age 25 34', 'age 35 44', 'age 45 54', 'age 5 14', 'age 55 64', 'age 75 84', 'age 85 plus', 'sex female', 'sex male', 'overall'))
+```
+
+
+```{r load-gun-law-data, echo=FALSE}
+# Load Gun Law Data
+
+gun_laws_data <- read.csv("https://raw.githubusercontent.com/Doumgit/D608-Projects/refs/heads/main/Week%206/Story%203/giffords_gun_law_data.csv")
+
+# Rename columns to consistent names and clean state values
+gun_laws_data <- gun_laws_data %>%
+  rename(
+    GunLawsStrengthRank = GUN.LAW.STRENGTH..RANKED.,
+    state = STATE,
+    Grade = X2019.GRADE,
+    GunDeathRateRank = GUN.DEATH.RATE..RANKED.,
+    GunDeathRatePer100K = GUN.DEATH.RATE..PER.100K.
+  ) %>%
+  mutate(state = tolower(state))
+```
+
+
+```{r create-likert-scale, echo=FALSE}
+# Create a 5-point Likert Scale for Gun Control Laws
+
+# Rank gun laws from most lax to strictest based on available scores
+gun_laws_data <- gun_laws_data %>%
+  mutate(Likert_Scale = case_when(
+    GunLawsStrengthRank >= 40 ~ "Very Lax",
+    GunLawsStrengthRank >= 30 & GunLawsStrengthRank < 40 ~ "Lax",
+    GunLawsStrengthRank >= 20 & GunLawsStrengthRank < 30 ~ "Moderate",
+    GunLawsStrengthRank >= 10 & GunLawsStrengthRank < 20 ~ "Strict",
+    GunLawsStrengthRank < 10 ~ "Very Strict"
+  ))
+```
+
+
+```{r merge-data, echo=FALSE}
+# Merge Firearm Mortality Data with Gun Control Laws Data
+
+merged_data <- cdc_long_state %>%
+  inner_join(gun_laws_data, by = c("state" = "state")) %>%
+  filter(!is.na(rate_overall))
+```
+
+
+```{r analysis, echo=FALSE}
+# Analysis: Relationship Between Gun Laws and Firearm Mortality
+
+# Group by Likert Scale and calculate average firearm mortality rate
+analysis <- merged_data %>%
+  group_by(Likert_Scale) %>%
+  summarise(avg_mortality_rate = mean(rate_overall, na.rm = TRUE))
+
+# Print the summary table
+#print(analysis)
+```
+
+# Heat Map: Firearm Mortality Rate by Gun Law Strictness
+```{r heatmap-gun-law-strictness, echo=FALSE}
+suppressWarnings({
+  # Create a heatmap of firearm mortality rate by gun law strictness
+heatmap_data <- merged_data %>%
+  group_by(state, Likert_Scale) %>%
+  summarise(avg_rate = mean(rate_overall, na.rm = TRUE), .groups = 'drop')
+
+# Highlight states in "Very Strict" category
+very_strict_states <- heatmap_data %>% filter(Likert_Scale == "Very Strict") %>% pull(state)
+
+# Plotting heatmap
+heatmap_plot <- ggplot(heatmap_data, aes(x = state, y = Likert_Scale, fill = avg_rate)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis(name = "Firearm Mortality Rate", option = "C") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1, size = 7.5, color = ifelse(heatmap_data$state %in% very_strict_states, "green", "black")),
+        panel.grid = element_blank()) +
+  labs(title = "Firearm Mortality Rate by Gun Control Strictness",
+       x = "State",
+       y = "Gun Control Strictness") +
+  annotate("text", x = 8, y = "Very Strict", label = "Lower rates observed in stricter states", color = "green", size = 4, hjust = 0, fontface='bold')
+
+# Display the heatmap
+print(heatmap_plot)
+})
+```
+
+
+# Heat Map: Average Firearm Mortality by Likert Scale
+```{r heatmap-average-mortality, echo=FALSE}
+# Create a heatmap showing average firearm mortality by Likert Scale
+avg_mortality_data <- merged_data %>%
+  group_by(Likert_Scale) %>%
+  summarise(avg_mortality_rate = mean(rate_overall, na.rm = TRUE))
+
+# Plotting heatmap
+avg_heatmap_plot <- ggplot(avg_mortality_data, aes(x = Likert_Scale, y = "", fill = avg_mortality_rate)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis(name = "Avg Firearm Mortality Rate", option = "C") +
+  theme_minimal() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid = element_blank()) +
+  labs(title = "Average Firearm Mortality Rate by Gun Control Strictness",
+       x = "Gun Control Strictness",
+       y = "") +
+  geom_text(aes(label = paste0("Avg Rate: 
+", round(avg_mortality_rate, 1))), color = "white", fontface = 'bold', size = 4, angle = 90, vjust = 0.5)
+
+# Display the heatmap
+print(avg_heatmap_plot)
+```
+
+
+# Conclusion
+
+- States with stricter gun control laws ("Very Strict") tend to have lower firearm mortality rates, as seen in the highlighted heatmap where these states generally show reduced rates compared to others.
+- The average firearm mortality rate heatmap also supports this conclusion, with the "Very Strict" category displaying the lowest average mortality rate (70.9), compared to more lenient categories such as "Lax" or "Very Lax," which have higher average rates (89.6 and 89.4, respectively).
+- These findings suggest that stricter gun control laws may contribute to reducing firearm-related deaths, although variations do exist, and other factors such as socio-economic conditions could also influence mortality rates.
+
+
+# Sources
+- CDC Firearm Mortality Data: https://data.cdc.gov/resource/489q-934x.json
+- Giffords Gun Law Scorecard: https://giffords.org/lawcenter/resources/scorecard2019/)
