@@ -1,0 +1,310 @@
+---
+title: "Story4: How much do 'Data Practitioner' get paid?"
+author: "Souleymane Doumbia - Presentation"
+date: "`r Sys.Date()`"
+output:
+  slidy_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 4
+    toc_float: true
+  beamer_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+  ioslides_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 4
+  html_document:
+    toc: true
+    toc_depth: '4'
+    df_print: paged
+---
+
+
+# Introduction
+
+In today's data-driven world, professionals known as \textbf{Data Practitioners} --- including Data Scientists, Data Engineers, Data Analysts, Business Intelligence Analysts, and Database Architects --- play a crucial role in shaping business strategies and decision-making processes. This analysis aims to provide insight into how much Data Practitioners are paid, exploring salary variation by role and state. We use 2023 **Occupational Employment and Wage data** from the U.S. Bureau of Labor Statistics to uncover trends in average salary and employment concentration across the United States, allowing us to highlight regional differences and compensation ranges within each role.
+
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#-----------------------------------------------------------------------
+# Necessary Libraries
+suppressMessages({
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+#library(maps)
+library(scales)  # Load scales package for comma formatting
+})
+#-----------------------------------------------------------------------
+
+
+#-----------------------------------------------------------------------
+# Loading 2023 BLS Wage Data for Data Practioner - Loading the CSV file
+filtered_data_cleaned <- read.csv("https://raw.githubusercontent.com/Doumgit/D608-Projects/refs/heads/main/Week%208/Story%204/2023_BLS_DataPractioner_Wage_Cleaned.csv")
+
+# List of columns to convert
+percentile_columns <- c("TOT_EMP","A_MEAN","A_PCT10", "A_PCT25", "A_MEDIAN", "A_PCT75", "A_PCT90")
+
+# Remove commas and convert to numeric
+filtered_data_cleaned[percentile_columns] <- lapply(filtered_data_cleaned[percentile_columns], function(x) {
+  as.numeric(gsub(",", "", x))
+})
+#-----------------------------------------------------------------------
+
+
+#-----------------------------------------------------------------------
+# Add a Classification column to the original data for data practioner role
+filtered_data_cleaned <- filtered_data_cleaned %>%
+  mutate(Classification = case_when(
+    OCC_CODE == "15-1242" ~ "Data Engineer",
+    OCC_CODE %in% c("15-1243", "11-3021") ~ "Data Architect",
+    OCC_CODE == "15-2051" ~ "Data Scientist",
+    OCC_CODE %in% c("15-2031", "15-2041") ~ "Data Analyst",
+    OCC_CODE %in% c("13-2051", "13-2031", "13-2041") ~ "Business Intelligence",
+    TRUE ~ NA_character_  # Mark any unmatched OCC_CODE as NA for clarity
+  ))
+
+
+
+# Define the function to classify based on OWN_CODE
+classify_ownership <- function(own_code) {
+  case_when(
+    own_code == 1 ~ "Federal Government",
+    own_code == 2 ~ "State Government",
+    own_code == 3 ~ "Local Government",
+    own_code == 123 ~ "Government (Federal, State, Local)",
+    own_code == 235 ~ "Mixed Public-Private",
+    own_code == 35 ~ "Private and Local Government",
+    own_code == 5 ~ "Private Sector",
+    own_code == 57 ~ "Gambling & Casino",
+    own_code == 58 ~ "Health & Government",
+    own_code == 59 ~ "Private & Postal Service",
+    own_code == 1235 ~ "All Sectors (Gov & Private)",
+    TRUE ~ NA_character_  # Assign NA for any unmatched code
+  )
+}
+
+# Apply the classification to create a new column in the dataset
+filtered_data_cleaned <- filtered_data_cleaned %>%
+  mutate(Broad_Industry = sapply(OWN_CODE, classify_ownership))
+#-----------------------------------------------------------------------
+```
+
+
+
+
+#
+```{r Salary_by_Role_National_Level, echo=FALSE}
+# National Average Salary and Total Employment by Data Practitioner Role
+#-----------------------------------------------------------------------
+## Data overview: summarizing total employment and mean salary by role
+role_overview <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '1', OWN_CODE == '1235') %>%
+  select(Classification, TOT_EMP, A_MEAN) %>%
+  group_by(Classification) %>%
+  summarise(Average_Salary = mean(A_MEAN, na.rm = TRUE), Total_emp = sum(TOT_EMP, na.rm = TRUE))
+#-----------------------------------------------------------------------
+
+# Sort roles by Average Salary in descending order
+sorted_roles <- role_overview %>%
+  arrange(desc(Average_Salary)) %>%
+  pull(Classification)
+
+# Reshape data for faceting and set "Classification" with sorted levels
+role_overview_long <- role_overview %>%
+  pivot_longer(cols = c(Average_Salary, Total_emp), names_to = "Metric", values_to = "Value") %>%
+  mutate(Classification = factor(Classification, levels = sorted_roles),
+         Color = ifelse(Classification == "Data Architect", "highlight", "gray"))
+
+# Plot with faceting and enhanced formatting
+ggplot(role_overview_long, aes(x = Classification, y = Value, fill = Color)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  facet_wrap(~ Metric, scales = "free_x", labeller = as_labeller(c(Average_Salary = "Average Salary (USD)", Total_emp = "Total Employment"))) +
+  scale_fill_manual(values = c("highlight" = "steelblue", "gray" = "lightgray"), guide = "none") +
+  labs(title = "National Average Salary and Total Employment by Data Practitioner Role",
+       x = "Data Practitioner Role",
+       y = "") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),            # Remove background grid
+    strip.text = element_text(face = "bold"), # Bold facet labels
+    axis.text.x = element_text(size = 10),    # Adjust size for clarity
+    plot.title = element_text(hjust = 0.5)    # Center title
+  ) +
+  scale_y_continuous(labels = scales::comma)  # Format large numbers with commas
+```
+
+
+
+#
+```{r Salary_by_Role_by_Industry, echo=FALSE}
+# Data Practioner Average Salary by Industry (National Level)
+# Reshaping the data and applying the required transformations
+industries_salary <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '1', OWN_CODE != '1235', !Broad_Industry %in% c("Government (Federal, State, Local)", "Private & Postal Service")) %>%
+  select(Broad_Industry, TOT_EMP, A_MEAN) %>%
+  group_by(Broad_Industry) %>%
+  summarise(Average_Salary = mean(A_MEAN, na.rm = TRUE), Total_emp = sum(TOT_EMP, na.rm = TRUE)) 
+
+# Assign color for Federal Government and Private Sector, gray for others
+industries_salary$Color <- ifelse(industries_salary$Broad_Industry %in% c("Federal Government", "Private Sector"),
+                                   ifelse(industries_salary$Broad_Industry == "Federal Government", "steelblue", "lightblue"),
+                                   "gray")
+
+# Bar chart of average salary by role
+ggplot(industries_salary, aes(x = reorder(Broad_Industry, Average_Salary), y = Average_Salary, fill = Color)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = 113268.18, color = "lightblue", linetype = "dashed", linewidth = 0.7) +  # Add red dashed line at $110,000
+  annotate("text", x = "Mixed Public-Private", y = 113268.18, label = "$113,268", vjust = -.5, hjust = 0.5, color = "lightblue", size = 3.5, fontface = "bold", angle = 90) +
+  geom_hline(yintercept = 115394, color = "steelblue", linetype = "dashed", linewidth = 0.7) +
+  
+  annotate("text", x = "Mixed Public-Private", y = 115394, label = "$115,394", vjust = 1.3, hjust = 0.5, color = "steelblue", size = 3.5, fontface = "bold", angle = 90) +  # Add label along
+  scale_fill_identity() +  # Use the assigned colors directly
+  scale_y_continuous(labels = comma) +
+  coord_flip() +  # Flip the axes to have horizontal bars
+  labs(title = "Data Practitioner Average Salary by Industry",
+       x = "Data Practitioner",
+       y = "Average Salary (USD)") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 6, face = "bold"),
+    axis.text.y = element_text(size = 7, face = "bold"),
+    legend.position = "none",  # Hide the legend
+    plot.title = element_text(hjust = 0.5, size = 15, face = "bold"),    # Center title
+    axis.title.x = element_text(size = 11, face = "bold"),
+    axis.title.y = element_text(size = 11, face = "bold"),
+    panel.grid = element_blank(),  # Remove minor grid lines
+    plot.margin = margin(t = 15, r = 15, b = 15, l = 15),  # Adjust plot margins
+  )
+```
+
+
+#
+```{r Salary_by_Role_Private_Sector, echo=FALSE}
+# Top 10 High-Paying Private Sectors for Data Practitioners
+#-----------------------------------------------------------------------
+## Data overview: summarizing total employment and mean salary by role
+industries_private <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '1', OWN_CODE != '1235', Broad_Industry == "Private Sector" ) %>%
+  select(Broad_Industry, NAICS_TITLE, TOT_EMP, A_MEAN) %>%
+  group_by(NAICS_TITLE) %>%
+  summarise(Average_Salary = mean(A_MEAN, na.rm = TRUE), Total_emp = sum(TOT_EMP, na.rm = TRUE)) %>%
+  arrange(desc(Average_Salary)) %>%
+  head(10)
+
+# Update the NAICS_TITLE values to shorter names
+industries_private <- industries_private %>%
+  mutate(NAICS_TITLE = case_when(
+    NAICS_TITLE == "Taxi and Limousine Service" ~ "Taxi Services",
+    NAICS_TITLE == "Jewelry, Luggage, and Leather Goods Retailers" ~ "Luxury Retail",
+    NAICS_TITLE == "Local Messengers and Local Delivery" ~ "Delivery Services",
+    NAICS_TITLE == "Support Activities for Rail Transportation" ~ "Rail Support",
+    NAICS_TITLE == "Hydroelectric Power Generation" ~ "Hydropower",
+    NAICS_TITLE == "Farm and Garden Machinery and Equipment Merchant Wholesalers" ~ "Farm Wholesalers",
+    NAICS_TITLE == "Support Activities for Crop Production" ~ "Crop Support",
+    NAICS_TITLE == "Textile and Fabric Finishing and Fabric Coating Mills" ~ "Textile Mills",
+    NAICS_TITLE == "Other Investment Pools and Funds" ~ "Investment Funds",
+    TRUE ~ NAICS_TITLE # Leave other titles as they are
+  ))
+#-----------------------------------------------------------------------
+
+# Assign color for Federal Government and Private Sector, gray for others
+industries_private$Color <- ifelse(industries_private$NAICS_TITLE %in% c("Photographic Services", "Taxi Services"),
+                                   ifelse(industries_private$NAICS_TITLE == "Photographic Services", "steelblue", "steelblue"),
+                                   "lightblue")
+
+#-----------------------------------------------------------------------
+# Generate the bar chart with updated titles
+ggplot(industries_private, aes(x = reorder(NAICS_TITLE, Average_Salary), y = Average_Salary, fill = Color)) +
+  geom_bar(stat = "identity") +
+  
+  geom_hline(yintercept = 209000, color = "steelblue", linetype = "dashed", linewidth = 0.9) +  # Add red dashed line at $200,000
+  annotate("text", x = "Hydropower", y = 209000, label = "$210,000", vjust = -.5, hjust = 0.5, color = "steelblue", size = 4.5, fontface = "bold", angle = 90) +
+  
+  geom_hline(yintercept = 167467.5, color = "green", linetype = "dashed", linewidth = 0.9) +  # Add red dashed line at $200,000
+  annotate("text", x = "Investment Funds", y = 167000, label = "$167,000", vjust = 1.45, hjust = 0.5, color = "steelblue", size = 3.8, fontface = "bold", angle = 90) +
+  
+  coord_flip() +
+  scale_fill_identity() +  # Use the assigned colors directly
+  scale_y_continuous(labels = comma) +
+  labs(title = "Top 10 High-Paying Private Sectors for Data Practitioners",
+       x = "Private Industry",
+       y = "Average Salary (USD)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 6, face = "bold"), 
+        axis.text.y = element_text(size = 7, face = "bold"),
+        plot.title = element_text(hjust = 0.5, size = 15, face = "bold"),    # Center title
+        axis.title.x = element_text(size = 11, face = "bold"),
+        axis.title.y = element_text(size = 11, face = "bold"),
+        legend.position = "none",  # Hide the legend
+        panel.grid = element_blank(),  # Remove minor grid lines
+        plot.margin = margin(t = 15, r = 15, b = 15, l = 15),  # Adjust plot margins)
+  )
+#-----------------------------------------------------------------------
+```
+
+# 
+```{r Salary_by_Role_State_Level, echo=FALSE}
+# Average Salary by State and Data Practioner Role
+#-----------------------------------------------------------------------
+## Data overview: summarizing total employment and mean salary by role
+suppressMessages(
+{role_state_overview <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '2') %>% # Only OWN_CODE == '1235' is that AREA_TYPE
+  select(AREA_TITLE, Classification, TOT_EMP, A_MEAN) %>%
+  group_by(AREA_TITLE, Classification) %>%
+  summarise(Average_Salary = mean(A_MEAN, na.rm = TRUE), Total_emp = sum(TOT_EMP, na.rm = TRUE))
+})
+#-----------------------------------------------------------------------
+
+#-----------------------------------------------------------------------
+#- Heatmap of average salary by state and role
+ggplot(role_state_overview, aes(x = AREA_TITLE, y = Classification, fill = Average_Salary)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "lightblue", high = "darkblue", na.value = "grey") +
+  labs(title = "Average Salary by State and Data Practioner Role",
+       x = "State",
+       y = "Data Practioner Role",
+       fill = "Average Salary (USD)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 6),
+        axis.text.y = element_text(size = 8),
+        plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        axis.title.x = element_text(face = "bold", size = 11),
+        axis.title.y = element_text(face = "bold", size = 11),
+        legend.position = "right",
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        panel.grid.major = element_blank(),   # Remove background grid
+        panel.grid.minor = element_blank(),   # Remove minor grid lines
+        plot.margin = unit(c(0.15, 0.15, 0.15, 0.15), "cm")  # Add spacing around the plot
+  )
+#-----------------------------------------------------------------------
+```
+
+# Conclusion
+
+- **Data Architect as Top Earner:** Commands the highest average salary among data roles, exceeding $150,000, showing strong demand for high-level expertise.
+
+- **Federal vs. Private Sector:** Federal Government leads in salaries for data practitioners at over $115,000, with the Private Sector closely following, highlighting competitiveness in attracting talent.
+
+- **Top-Paying Private Industries:** Photographic and Taxi Services offer average salaries above $200,000, with all top ten private industries paying over $160,000, reflecting robust investment in data roles.
+
+- **High-Paying States:** California, New York, and Washington consistently offer the highest salaries for data roles, driven by strong tech and finance sectors.
+
+
+# Source
+
+- **Bureau of Labor Statistics (BLS) - Occupational Employment and Wage Statistics (OEWS) - May 2023 All Data**: [https://www.bls.gov](https://www.bls.gov/oes/tables.htm)
+- - -

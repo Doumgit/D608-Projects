@@ -1,0 +1,465 @@
+---
+title: "Story 4"
+author: "Souleymane Doumbia"
+date: "`r Sys.Date()`"
+output:
+  beamer_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+  slidy_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 3
+    toc_float: true
+  ioslides_presentation:
+    fig_width: 7
+    fig_height: 5
+    keep_md: true
+    toc: true
+    toc_depth: 3
+  html_document:
+    toc: true
+    toc_depth: '3'
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Necessary Libraries
+library(dplyr)
+library(ggplot2)
+```
+
+
+# Loading 2023 BLS Wage Data for Data Practioner
+```{r # Loading_2023_BLS_Wage_Data_for_Data_Practioner}
+## Loading 2023 BLS Wage Data for Data Practioner
+# Load the CSV file
+filtered_data_cleaned <- read.csv("/Users/souleymanedoumbia/Library/Mobile Documents/com~apple~CloudDocs/CUNY SPS CLASSES/MSDS CLASSES/DATA 608 FALL 2024/Week8/Story4/2023_BLS_DataPractioner_Wage_Cleaned.csv")
+
+# List of columns to convert
+percentile_columns <- c("TOT_EMP","A_MEAN","A_PCT10", "A_PCT25", "A_MEDIAN", "A_PCT75", "A_PCT90")
+
+# Remove commas and convert to numeric
+filtered_data_cleaned[percentile_columns] <- lapply(filtered_data_cleaned[percentile_columns], function(x) {
+  as.numeric(gsub(",", "", x))
+})
+
+#summary(filtered_data_cleaned)
+str(filtered_data_cleaned)
+head(filtered_data_cleaned)
+```
+
+# Introduction
+
+In today's data-driven world, professionals known as \textbf{Data Practitioners} --- including Data Scientists, Data Engineers, Data Analysts, Business Intelligence Analysts, and Database Architects --- play a crucial role in shaping business strategies and decision-making processes. This analysis aims to provide insight into how much Data Practitioners are paid, exploring salary variation by role and state. We use 2023 **Occupational Employment and Wage data** from the U.S. Bureau of Labor Statistics to uncover trends in average salary and employment concentration across the United States, allowing us to highlight regional differences and compensation ranges within each role.
+
+
+# Data Overview
+```{r Data_Overview}
+# Add a Classification column to the original data for data practioner role
+filtered_data_cleaned <- filtered_data_cleaned %>%
+  mutate(Classification = case_when(
+    OCC_CODE == "15-1242" ~ "Data Engineer",
+    OCC_CODE %in% c("15-1243", "11-3021") ~ "Data Architect",
+    OCC_CODE == "15-2051" ~ "Data Scientist",
+    OCC_CODE %in% c("15-2031", "15-2041") ~ "Data Analyst",
+    OCC_CODE %in% c("13-2051", "13-2031", "13-2041") ~ "Business Intelligence",
+    TRUE ~ NA_character_  # Mark any unmatched OCC_CODE as NA for clarity
+  ))
+
+
+
+# Load necessary library
+library(dplyr)
+
+# Define the function to classify based on OWN_CODE
+classify_ownership <- function(own_code) {
+  case_when(
+    own_code == 1 ~ "Federal Government",
+    own_code == 2 ~ "State Government",
+    own_code == 3 ~ "Local Government",
+    own_code == 123 ~ "Government (Federal, State, Local)",
+    own_code == 235 ~ "Mixed Public-Private",
+    own_code == 35 ~ "Private and Local Government",
+    own_code == 5 ~ "Private Sector",
+    own_code == 57 ~ "Gambling & Casino",
+    own_code == 58 ~ "Health & Government",
+    own_code == 59 ~ "Private & Postal Service",
+    own_code == 1235 ~ "All Sectors (Gov & Private)",
+    TRUE ~ NA_character_  # Assign NA for any unmatched code
+  )
+}
+
+# Apply the classification to create a new column in the dataset
+filtered_data_cleaned <- filtered_data_cleaned %>%
+  mutate(Broad_Industry = sapply(OWN_CODE, classify_ownership))
+
+# Check the result
+head(filtered_data_cleaned %>% select(OWN_CODE, Broad_Industry))
+
+
+
+
+## Verify that the Classification column has been added
+#print(head(filtered_data_cleaned))
+
+## Data overview: summarizing total employment and mean salary by role
+#role_overview <- filtered_data_cleaned %>%
+#  filter(AREA_TYPE == '1', OWN_CODE == '1235') %>%
+#  select(OCC_TITLE, TOT_EMP, A_MEAN) 
+  
+
+# Display summary table
+#print(role_overview)
+```
+
+
+
+# Salary by Role (National Level)
+```{r Salary_by_Role_(National Level)}
+# Bar chart of average salary by role
+ggplot(role_overview, aes(x = reorder(OCC_TITLE, A_MEAN), y = A_MEAN)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "National Average Salary by Data Practitioner Role",
+       x = "Role",
+       y = "Average Salary (USD)") +
+  theme_minimal()
+
+```
+
+
+
+# Salary Variation by State for Each Role
+```{r Salary_Variation_by_State_for_Each_Role}
+# Example: Average salary by role and state
+state_role_salary <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '2', OWN_CODE == '1235') %>%
+  select(AREA_TITLE, OCC_TITLE, TOT_EMP, A_MEAN) 
+
+# Heatmap of average salary by state and role
+ggplot(state_role_salary, aes(x = AREA_TITLE, y = OCC_TITLE, fill = A_MEAN)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "lightblue", high = "darkblue", na.value = "grey") +
+  labs(title = "Average Salary by State and Role",
+       x = "State",
+       y = "Role") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=5))
+
+```
+
+
+# Salary Distribution by Role (Percentiles)
+```{r Salary_Distribution_by_Role_(Percentiles)}
+# Melt data for percentiles for easier plotting
+library(reshape2)
+
+salary_percentiles <- filtered_data_cleaned %>%
+  select(OCC_TITLE, A_PCT10, A_PCT25, A_MEDIAN, A_PCT75, A_PCT90) %>%
+  melt(id.vars = "OCC_TITLE", variable.name = "Percentile", value.name = "Salary")
+
+# Box plot by role showing salary distribution
+ggplot(salary_percentiles, aes(x = OCC_TITLE, y = Salary, fill = Percentile)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(title = "Salary Distribution by Role (10th to 90th Percentile)",
+       x = "Role",
+       y = "Salary (USD)") +
+  theme_minimal()
+
+```
+
+
+# Employment Concentration by State
+```{r Employment_Concentration_by_State}
+# Employment concentration by state and role
+state_employment <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '2', OWN_CODE == '1235') 
+
+# Heatmap for employment concentration by state and role
+ggplot(state_employment, aes(x = AREA_TITLE, y = OCC_TITLE, fill = TOT_EMP)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "lightyellow", high = "darkorange", na.value = "grey") +
+  labs(title = "Employment Concentration by State and Role",
+       x = "State",
+       y = "Role") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=5))
+```
+# Median Salary by Role Across Percentiles
+
+```{r Median_Salary_by_Role_Across_Percentiles}
+# Salary percentiles by role
+salary_percentiles <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '1', OWN_CODE == '1235') %>%
+  select(OCC_TITLE, A_PCT10, A_PCT25, A_MEDIAN, A_PCT75, A_PCT90) %>%
+  pivot_longer(cols = starts_with("A_"), names_to = "Percentile", values_to = "Salary")
+
+# Line plot of salary percentiles for each role
+ggplot(salary_percentiles, aes(x = Percentile, y = Salary, group = OCC_TITLE, color = OCC_TITLE)) +
+  geom_line(size = 1) +
+  labs(title = "Salary Distribution by Percentile for Each Role",
+       x = "Percentile",
+       y = "Salary (USD)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+# Role Employment and Salary Comparison
+```{r Role_Employment_and_Salary_Comparison}
+# Scatter plot of total employment vs. average salary by role
+role_employment_salary <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '1', OWN_CODE == '1235') %>%
+  group_by(OCC_TITLE) %>%
+  summarise(Total_Employment = sum(TOT_EMP, na.rm = TRUE),
+            Average_Salary = mean(A_MEAN, na.rm = TRUE))
+
+ggplot(role_employment_salary, aes(x = Total_Employment, y = Average_Salary, label = OCC_TITLE)) +
+  geom_point(color = "steelblue", size = 3) +
+  geom_text(nudge_y = 5000, size = 3) +
+  labs(title = "Role Employment and Salary Comparison",
+       x = "Total Employment",
+       y = "Average Salary (USD)") +
+  theme_minimal()
+```
+
+# Top 5 States with Highest Average Salary by Role
+```{r}
+# Top 5 states by average salary for each role
+top_states_salary <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '2', OWN_CODE == '1235') %>%
+  arrange(OCC_TITLE, desc(A_MEAN)) %>%
+  group_by(OCC_TITLE) %>%
+  slice_max(A_MEAN, n = 5) %>%
+  ungroup()
+
+# Bar chart for top states by average salary for each role
+ggplot(top_states_salary, aes(x = reorder(AREA_TITLE, A_MEAN), y = A_MEAN, fill = OCC_TITLE)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  facet_wrap(~ OCC_TITLE, scales = "free_y") +
+  labs(title = "Top 5 States with Highest Average Salary by Role",
+       x = "State",
+       y = "Average Salary (USD)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+
+
+
+# AFTER CLASSIFICATION OF DATA PRACTIONER JOBS
+
+# Average Salary (National Level)
+```{r Average_Salary_by_Classification_National_Level}
+classification_salary <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '1', OWN_CODE == '1235') %>%
+  mutate(Classification = case_when(
+    OCC_CODE == "15-1242" ~ "Data Engineer",
+    OCC_CODE %in% c("15-1243", "11-3021") ~ "Data Architect",
+    OCC_CODE == "15-2051" ~ "Data Scientist",
+    OCC_CODE %in% c("15-2031", "15-2041") ~ "Data Analyst",
+    OCC_CODE %in% c("13-2051", "13-2031", "13-2041") ~ "Business Intelligence"
+  )) %>%
+  group_by(Classification) %>%
+  summarise(Average_Salary = mean(A_MEAN, na.rm = TRUE))
+
+ggplot(classification_salary, aes(x = reorder(Classification, Average_Salary), y = Average_Salary, fill = Classification)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "National Average Salary by Classification",
+       x = "Classification",
+       y = "Average Salary (USD)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+
+# Salary Variation by State for Each Classification
+```{r Salary_Variation_by_State_for_Each_Classification}
+state_classification_salary <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '2', OWN_CODE == '1235') %>%
+  mutate(Classification = case_when(
+    OCC_CODE == "15-1242" ~ "Data Engineer",
+    OCC_CODE %in% c("15-1243", "11-3021") ~ "Data Architect",
+    OCC_CODE == "15-2051" ~ "Data Scientist",
+    OCC_CODE %in% c("15-2031", "15-2041") ~ "Data Analyst",
+    OCC_CODE %in% c("13-2051", "13-2031", "13-2041") ~ "Business Intelligence"
+  ))
+
+ggplot(state_classification_salary, aes(x = AREA_TITLE, y = Classification, fill = A_MEAN)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "lightblue", high = "darkblue", na.value = "grey") +
+  labs(title = "Salary Variation by State for Each Classification",
+       x = "State",
+       y = "Classification") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=5))
+
+```
+
+
+
+# Top 5 States with Highest Average Salary per Classification
+```{r Top_5_States_with_Highest_Average_Salary_per_Classification}
+top_states_classification <- state_classification_salary %>%
+  arrange(Classification, desc(A_MEAN)) %>%
+  group_by(Classification) %>%
+  slice_max(A_MEAN, n = 5) %>%
+  ungroup()
+
+ggplot(top_states_classification, aes(x = reorder(AREA_TITLE, A_MEAN), y = A_MEAN, fill = Classification)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  facet_wrap(~ Classification, scales = "free_y") +
+  labs(title = "Top 5 States with Highest Average Salary by Classification",
+       x = "State",
+       y = "Average Salary (USD)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+
+
+
+# Salary Percentiles by Classification
+```{r Salary_Percentiles_by_Classification}
+classification_percentiles <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '1', OWN_CODE == '1235') %>%
+  mutate(Classification = case_when(
+    OCC_CODE == "15-1242" ~ "Data Engineer",
+    OCC_CODE %in% c("15-1243", "11-3021") ~ "Data Architect",
+    OCC_CODE == "15-2051" ~ "Data Scientist",
+    OCC_CODE %in% c("15-2031", "15-2041") ~ "Data Analyst",
+    OCC_CODE %in% c("13-2051", "13-2031", "13-2041") ~ "Business Intelligence"
+  )) %>%
+  select(Classification, A_PCT10, A_PCT25, A_MEDIAN, A_PCT75, A_PCT90) %>%
+  pivot_longer(cols = starts_with("A_"), names_to = "Percentile", values_to = "Salary")
+
+ggplot(classification_percentiles, aes(x = Percentile, y = Salary, group = Classification, color = Classification)) +
+  geom_line(size = 1) +
+  labs(title = "Salary Distribution by Percentile for Each Classification",
+       x = "Percentile",
+       y = "Salary (USD)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+# Average Salary By Industry
+```{r Average_Salary_By_Industry}
+# Filter data for national level and specific industries
+industry_national_data <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '1', !OWN_CODE %in% c('1235', '123', '235'), !NAICS %in% c('000000', '000001')) %>%
+  group_by(NAICS_TITLE, NAICS) %>%
+  summarise(
+    Total_Employment = sum(TOT_EMP, na.rm = TRUE),
+    Average_Salary = mean(A_MEAN, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Average_Salary)) %>%
+  head(15)  # Select top 15 industries by average salary
+
+# Display the grouped data
+#print(industry_national_data)
+
+# Bar chart for top 15 industries by average salary
+ggplot(industry_national_data, aes(x = reorder(NAICS_TITLE, Average_Salary), y = Average_Salary)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 15 Industries by Average Salary (National Level)",
+       x = "Industry",
+       y = "Average Salary (USD)") +
+  theme_minimal()
+```
+
+```{r Classification_data_practioner}
+# Add a Classification column to the original data
+filtered_data_cleaned <- filtered_data_cleaned %>%
+  mutate(Classification = case_when(
+    OCC_CODE == "15-1242" ~ "Data Engineer",
+    OCC_CODE %in% c("15-1243", "11-3021") ~ "Data Architect",
+    OCC_CODE == "15-2051" ~ "Data Scientist",
+    OCC_CODE %in% c("15-2031", "15-2041") ~ "Data Analyst",
+    OCC_CODE %in% c("13-2051", "13-2031", "13-2041") ~ "Business Intelligence",
+    TRUE ~ NA_character_  # Mark any unmatched OCC_CODE as NA for clarity
+  ))
+
+# Verify that the Classification column has been added
+print(head(filtered_data_cleaned))
+```
+
+
+```{r}
+# Filter for national level and specific industries, then get top 15 industries by average salary
+industry_classification_data <- filtered_data_cleaned %>%
+  filter(AREA_TYPE == '1', !OWN_CODE %in% c('1235', '123', '235'), !NAICS %in% c('000000', '000001')) %>%
+  group_by(NAICS_TITLE, Classification) %>%
+  summarise(
+    Total_Employment = sum(TOT_EMP, na.rm = TRUE),
+    Average_Salary = mean(A_MEAN, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  arrange(desc(Average_Salary)) %>%
+  slice_head(n = 15)  # Get top 15 industries
+
+# Stacked bar chart for Classification Distribution within Top 15 Industries
+ggplot(industry_classification_data, aes(x = reorder(NAICS_TITLE, Average_Salary), y = Average_Salary, fill = Classification)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Distribution of Data Practitioner Roles within Top 15 Industries by Average Salary",
+       x = "Industry",
+       y = "Average Salary (USD)",
+       fill = "Classification") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+
+```
+```{r}
+library(ggplot2)
+library(cowplot)
+
+# Sample data
+data <- data.frame(
+  x = rep(c("A", "B", "C", "D", "E"), each = 5),
+  y = c(50, 30, 70, 60, 40, 90, 60, 50, 40, 80, 110, 80, 30, 50, 70, 120, 100, 50, 60, 40, 150, 120, 80, 90, 70),
+  group = rep(c("F", "G", "H", "I", "J"), times = 5)
+)
+
+# Create a stacked bar chart
+plot <- ggplot(data, aes(x = x, y = y, fill = group)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(x = "Category", y = "Value", fill = "Group") +
+  ggtitle("Stacked Bar Chart")
+
+# Create annotation as a plot with text
+text_plot <- ggdraw() + 
+  draw_label(
+    "Key Insight:\n- Group F has the highest values.\n- Group J shows consistent contributions.",
+    x = -0.5, y = 1, hjust = 0, vjust = 1, size = 7, color = "black"
+  )
+
+# Combine the plot and annotation using cowplot
+final_plot <- plot_grid(
+  plot, text_plot, 
+  ncol = 2, 
+  rel_widths = c(3, 1)  # Adjust relative widths
+)
+
+# Display the final plot
+print(final_plot)
+
+```
+
+
